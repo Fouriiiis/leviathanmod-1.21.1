@@ -51,12 +51,12 @@ public class LeviathanModel extends GeoModel<LeviathanEntity> {
         }
 
         // seg2..seg18: use RELATIVE deltas for hierarchical GEO
-        for (int i = 2; i <= 18; i++) {
+        for (int i = 1; i <= 18; i++) {
             var bone = this.getAnimationProcessor().getBone("seg" + i);
             if (bone == null) continue;
             if (i < e.chain.size()) {
-                bone.setRotY(e.chain.yawRel[i]);
-                bone.setRotX(e.chain.pitchRel[i]);
+                bone.setRotY(-e.chain.yawRel[i]);
+                bone.setRotX(-e.chain.pitchRel[i]);
                 bone.setRotZ(0f);
             } else {
                 bone.setRotX(0f); bone.setRotY(0f); bone.setRotZ(0f);
