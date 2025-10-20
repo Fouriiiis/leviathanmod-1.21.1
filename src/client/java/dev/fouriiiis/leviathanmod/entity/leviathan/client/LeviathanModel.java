@@ -7,12 +7,11 @@ import software.bernie.geckolib.animation.AnimationState;
 import software.bernie.geckolib.model.GeoModel;
 
 /**
- * Straight-line model alignment.
- * Applies a +90° yaw correction so GEO (+X forward) matches Minecraft (+Z forward).
+ * Applies +90° yaw correction so GEO(+X) faces MC(+Z),
+ * then bends each segN bone using RELATIVE yaw/pitch from the follow IK chain.
  */
 public class LeviathanModel extends GeoModel<LeviathanEntity> {
-    // GEO(+X) -> MC(+Z): rotate +90° around Y (flip from previous -90°).
-    private static final float YAW_CORRECTION_RAD = (float) (Math.PI / 2.0);
+    private static final float YAW_CORRECTION_RAD = (float)(Math.PI / 2.0);
 
     @Override
     public Identifier getModelResource(LeviathanEntity animatable) {
@@ -33,7 +32,7 @@ public class LeviathanModel extends GeoModel<LeviathanEntity> {
     public void setCustomAnimations(LeviathanEntity e, long instanceId, AnimationState<LeviathanEntity> state) {
         super.setCustomAnimations(e, instanceId, state);
 
-        // Apply the frame correction on the root
+        // Root correction: GEO +X -> MC +Z
         var root = this.getAnimationProcessor().getBone("root");
         if (root != null) {
             root.setRotX(0f);
@@ -41,13 +40,26 @@ public class LeviathanModel extends GeoModel<LeviathanEntity> {
             root.setRotZ(0f);
         }
 
-        // Keep all seg bones rotation-zero (straight baseline)
-        for (int i = 1; i <= 18; i++) {
+        if (e == null || e.chain == null) return;
+
+        // seg1: entity yaw already points head; only apply absolute pitch from link-1
+        var seg1 = this.getAnimationProcessor().getBone("seg1");
+        if (seg1 != null && e.chain.size() > 1) {
+            seg1.setRotY(0f);
+            seg1.setRotX(e.chain.pitchAbs[1]);
+            seg1.setRotZ(0f);
+        }
+
+        // seg2..seg18: use RELATIVE deltas for hierarchical GEO
+        for (int i = 2; i <= 18; i++) {
             var bone = this.getAnimationProcessor().getBone("seg" + i);
-            if (bone != null) {
-                bone.setRotX(0f);
-                bone.setRotY(0f);
+            if (bone == null) continue;
+            if (i < e.chain.size()) {
+                bone.setRotY(e.chain.yawRel[i]);
+                bone.setRotX(e.chain.pitchRel[i]);
                 bone.setRotZ(0f);
+            } else {
+                bone.setRotX(0f); bone.setRotY(0f); bone.setRotZ(0f);
             }
         }
     }
