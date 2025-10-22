@@ -1,4 +1,3 @@
-// Replace your FollowIKChain with this version (only the angle section changed)
 package dev.fouriiiis.leviathanmod.entity.leviathan;
 
 import net.minecraft.util.math.BlockPos;
@@ -8,34 +7,33 @@ import net.minecraft.util.math.Vec3i;
 import net.minecraft.world.World;
 
 public final class FollowIKChain {
-    private final int n;
-    private final Vec3d[] joints;
+    private final int n;                 // joint count
+    private final Vec3d[] joints;        // 0..n-1
     private final Vec3d[] prevJoints;
-    private final double[] lengths;
+    private final double[] lengthsExt;   // link count = n-1
 
     private boolean initialized;
     private boolean avoidTerrain = true;
     private double tipInertia = 0.12;
     private static final double EPS = 1e-12;
 
-    // Existing outputs (link-to-link relative)
-    public final float[] yawRel;
-    public final float[] pitchRel;
-
-    // Absolute yaw/pitch per link direction (i = 1..n-1)
-    public final float[] yawAbs;   // absolute yaw per link direction
-    public final float[] pitchAbs; // absolute pitch per link direction
+    // Per-link absolute angles (for seg mapping)
+    // link k is direction joints[k] -> joints[k+1]
+    public final float[] linkYawAbs;   // size = n-1
+    public final float[] linkPitchAbs; // size = n-1
 
     public FollowIKChain(double[] linkLengths) {
-        this.n = Math.max(2, linkLengths.length + 1);
+        // Extend by one extra link (repeat last length) to get an extra tail joint
+        this.lengthsExt = new double[linkLengths.length + 1];
+        System.arraycopy(linkLengths, 0, this.lengthsExt, 0, linkLengths.length);
+        this.lengthsExt[this.lengthsExt.length - 1] = linkLengths[linkLengths.length - 1];
+
+        this.n = Math.max(2, this.lengthsExt.length + 1);
         this.joints = new Vec3d[n];
         this.prevJoints = new Vec3d[n];
-        this.lengths = linkLengths.clone();
 
-    this.yawRel = new float[n];
-    this.pitchRel = new float[n];
-    this.yawAbs = new float[n];
-    this.pitchAbs = new float[n];
+        this.linkYawAbs = new float[n - 1];
+        this.linkPitchAbs = new float[n - 1];
     }
 
     private void lazyInit(Vec3d headPos, Vec3d headForward) {
@@ -46,7 +44,7 @@ public final class FollowIKChain {
 
         double accum = 0.0;
         for (int i = 1; i < n; i++) {
-            accum += lengths[i - 1];
+            accum += lengthsExt[i - 1]; // note: i-1 valid up to n-2
             Vec3d p = headPos.subtract(dir.multiply(accum));
             joints[i] = p;
             prevJoints[i] = p;
@@ -73,36 +71,23 @@ public final class FollowIKChain {
                 Vec3d d = b.subtract(a);
                 double l2 = d.lengthSquared();
                 Vec3d dir = (l2 < EPS) ? safeNorm(headForward) : d.multiply(1.0 / Math.sqrt(l2));
-                joints[i] = a.add(dir.multiply(lengths[i - 1]));
+                joints[i] = a.add(dir.multiply(lengthsExt[i - 1]));
                 if (avoidTerrain) joints[i] = pushOutOfSolid(world, joints[i]);
             }
-            joints[0] = headPos;
+            joints[0] = headPos; // re-pin head
         }
 
         for (int i = 0; i < n; i++) prevJoints[i] = joints[i];
 
-        computeRelativeAngles(headForward);
+        computeLinkAngles(headForward);
     }
 
-    // -------- ANGLES --------
-    private void computeRelativeAngles(Vec3d headForward) {
-        // Absolute yaw/pitch for each link (direction joints[i]-joints[i-1])
-        Vec3d d01 = dirSafe(0, 1, headForward);
-        yawAbs[1]   = yawOf(d01);
-        pitchAbs[1] = pitchOf(d01);
-
-        for (int i = 2; i < n; i++) {
-            Vec3d d = dirSafe(i - 1, i, headForward);
-            yawAbs[i]   = yawOf(d);
-            pitchAbs[i] = pitchOf(d);
-        }
-
-        // Link-to-link RELATIVE (for hierarchical chains like your GEO)
-        yawRel[1] = 0f;
-        pitchRel[1] = 0f;
-        for (int i = 2; i < n; i++) {
-            yawRel[i]   = wrap(yawAbs[i]   - yawAbs[i - 1]);
-            pitchRel[i] = wrap(pitchAbs[i] - pitchAbs[i - 1]);
+    // Compute absolute angles for link directions joints[k] -> joints[k+1]
+    private void computeLinkAngles(Vec3d headForward) {
+        for (int k = 0; k < n - 1; k++) {
+            Vec3d d = dirSafe(k, k + 1, headForward);
+            linkYawAbs[k]   = yawOf(d);
+            linkPitchAbs[k] = pitchOf(d);
         }
     }
 
@@ -119,17 +104,10 @@ public final class FollowIKChain {
         return v.multiply(1.0 / Math.sqrt(l2));
     }
 
-    private static float yawOf(Vec3d d) {
-        return (float) Math.atan2(d.z, d.x);
-    }
+    private static float yawOf(Vec3d d) { return (float) Math.atan2(d.z, d.x); }
     private static float pitchOf(Vec3d d) {
         double h = Math.sqrt(d.x * d.x + d.z * d.z);
         return (float) Math.atan2(d.y, h);
-    }
-    private static float wrap(float a) {
-        while (a <= -Math.PI) a += (float) (2 * Math.PI);
-        while (a >  Math.PI) a -= (float) (2 * Math.PI);
-        return a;
     }
 
     private static Vec3d pushOutOfSolid(World world, Vec3d p) {
@@ -150,6 +128,7 @@ public final class FollowIKChain {
     public void setAvoidTerrain(boolean v) { avoidTerrain = v; }
 
     // Access
-    public int size() { return n; }
+    public int jointCount() { return n; }        // joints 0..n-1
+    public int linkCount()  { return n - 1; }    // links  0..n-2 (== SEGMENTS)
     public Vec3d joint(int i) { return joints[i]; }
 }
